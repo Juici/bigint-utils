@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "moduleResolution": "node",
+    "noEmitOnError": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "target": "es2020",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "baseUrl": "./"
+  },
+  "include": ["src", "scripts", "rollup.config.ts"],
+  "exclude": ["dist", "node_modules"]
+}

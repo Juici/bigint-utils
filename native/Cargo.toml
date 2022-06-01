@@ -1,0 +1,17 @@
+[package]
+name = "bigint-utils"
+version = "0.0.0"
+edition = "2021"
+
+build = "build.rs"
+
+[lib]
+name = "bigint_utils"
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2.4.3", features = ["napi6"] }
+napi-derive = "2.4.1"
+
+[build-dependencies]
+napi-build = "2.0.0"
