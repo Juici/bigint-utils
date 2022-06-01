@@ -8,6 +8,20 @@ import { packageRoot } from "../root";
 const libName = name.replace(/-/g, "_");
 const root = process.env[`${libName.toUpperCase()}_PREBUILD`] ?? packageRoot;
 
+const abi = versions.modules;
+const runtime = isElectron()
+  ? "electron"
+  : versions.nw
+  ? "node-webkit"
+  : "node";
+const libc = process.env.LIBC || (isAlpine() ? "musl" : "glibc");
+const armv =
+  process.env.ARM_VERSION ||
+  (arch === "arm64"
+    ? "8"
+    : (process.config.variables as { arm_version?: string }).arm_version || "");
+const uv = versions.uv?.split(".")[0] ?? "";
+
 const modulePath = (() => {
   if (!process.env.PREBUILDS_ONLY) {
     const release = findBuild(path.join(root, "build/Release"));
@@ -48,20 +62,6 @@ export function loadNative(): NativeModule {
   }
   return require(modulePath);
 }
-
-const abi = versions.modules;
-const runtime = isElectron()
-  ? "electron"
-  : versions.nw
-  ? "node-webkit"
-  : "node";
-const libc = process.env.LIBC || (isAlpine() ? "musl" : "glibc");
-const armv =
-  process.env.ARM_VERSION ||
-  (arch === "arm64"
-    ? "8"
-    : (process.config.variables as { arm_version?: string }).arm_version || "");
-const uv = versions.uv?.split(".")[0] ?? "";
 
 /**
  * Search for a node-gyp build.
