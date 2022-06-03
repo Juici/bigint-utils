@@ -2,114 +2,51 @@
 #include <node/node_api.h>
 
 #include <assert.h>
-#include <limits.h>
 #include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 
-#define POOL_SIZE 8192
+#include "utils.h"
 
-#if _MSC_VER
-  #define inline __inline
-#endif
-
-#if defined(__GNUC__) || defined(__clang__)
-static inline size_t clzb(uint64_t n) {
-    return ((size_t) (__builtin_clzll(n) - ((sizeof(unsigned long long) * 8) - 64))) / 8;
-}
-#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
-  #include <intrin.h>
-
-  #if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
-    #pragma intrinsic(_BitScanReverse64)
-
-static inline size_t clzb(uint64_t n) {
-    unsigned long index;
-    _BitScanReverse64(&index, n);
-    return (63 - index) / 8;
-}
-  #else
-    #pragma intrinsic(_BitScanReverse)
-
-static inline size_t clzb(uint64_t n) {
-    unsigned long index;
-
-    #if ULONG_MAX != UINT64_MAX
-    if (n >> 32) {
-        _BitScanReverse(&index, n >> 32);
-        return (95 - index) / 8;
-    } else {
-    #endif
-        _BitScanReverse(&index, n);
-        return (63 - index) / 8;
-    #if ULONG_MAX != UINT64_MAX
-    }
-    #endif
-}
-  #endif
-#else
-static inline size_t clzb(uint64_t n) {
-    uint64_t a, b, r;
-    if ((a = word >> 32)) {
-        if ((b = a >> 16)) {
-            r = (b >> 8) ? 0 : 1;
-        } else {
-            r = (a >> 8) ? 2 : 3;
-        }
-    } else {
-        if ((a = word >> 16)) {
-            r = (a >> 8) ? 4 : 5;
-        } else {
-            r = (word >> 8) ? 6 : 7;
-        }
-    }
-    return r;
-}
-#endif
-
-/**
- * Hint that there is no aliased memory between `a` and `b` for `n` bytes.
- */
-static inline void revswap(uint8_t *restrict a, uint8_t *restrict b, size_t n) {
-    uint8_t x, y;
-    for (size_t i = 0; i < n; i++) {
-        x = a[i];
-        y = b[n - 1 - i];
-
-        a[i] = y;
-        b[n - 1 - i] = x;
-    }
-}
-
-static inline void reverse(uint8_t *data, size_t len) {
-    size_t half_len = len / 2;
-
-    uint8_t *front_half = data;
-    uint8_t *back_half = &data[len - half_len];
-
-    revswap(front_half, back_half, half_len);
-}
+// The size of an alloc pool in uint64_t words.
+#define POOL_SIZE 1024
 
 typedef struct allocation {
+    /**
+     * The pointer to the allocation in the array buffer.
+     */
     uint64_t *data;
+    /**
+     * The array buffer that the allocation is a part of.
+     */
     napi_value array_buffer;
+    /**
+     * The byte offset of the allocation in the array buffer.
+     */
     size_t offset;
 } allocation;
 
-napi_ref pool_ref;
+/**
+ * Reference to the array buffer representing the current allocation pool.
+ */
+static napi_ref pool_ref;
+/**
+ * Pointer to the current allocation pool.
+ */
+static uint64_t *pool_data;
+/**
+ * Current offset in the allocation pool.
+ *
+ * Start the offset past the end of the pool. This ensures that the first
+ * allocation will always allocate a new pool.
+ */
+static size_t pool_offset = POOL_SIZE + 1;
 
-// Start the offset past the end of the pool. This ensures that the first
-// allocation will always allocate a new pool.
-size_t pool_offset = POOL_SIZE + 1;
-uint8_t *pool_data;
-
-void create_pool(napi_env env) {
+static void create_pool(napi_env env) {
     napi_status status;
 
     napi_value pool;
 
-    status = napi_create_arraybuffer(env, POOL_SIZE, (void **) &pool_data, &pool);
+    status =
+        napi_create_arraybuffer(env, POOL_SIZE * sizeof(uint64_t), (void **) &pool_data, &pool);
     if (status != napi_ok) {
         goto fail;
     }
@@ -126,14 +63,13 @@ fail:
     napi_fatal_error(NULL, 0, "Failed to create alloc pool", NAPI_AUTO_LENGTH);
 }
 
-allocation alloc(napi_env env, size_t word_count) {
+static allocation alloc(napi_env env, size_t word_count) {
     napi_status status;
 
     allocation a;
 
-    size_t size = word_count * sizeof(uint64_t);
-    if (size < (POOL_SIZE >> 1)) {
-        if (size + pool_offset > POOL_SIZE) {
+    if (word_count < (POOL_SIZE >> 1)) {
+        if (word_count + pool_offset > POOL_SIZE) {
             if (pool_ref != NULL) {
                 status = napi_reference_unref(env, pool_ref, NULL);
                 assert(status == napi_ok);
@@ -148,13 +84,13 @@ allocation alloc(napi_env env, size_t word_count) {
             goto fail;
         }
 
-        // &pool_data[pool_offset] is always 8-byte aligned.
-        a.data = (uint64_t *) &pool_data[pool_offset];
-        a.offset = pool_offset;
+        a.data = &pool_data[pool_offset];
+        a.offset = pool_offset * sizeof(uint64_t);
 
-        pool_offset += size;
+        pool_offset += word_count;
     } else {
-        status = napi_create_arraybuffer(env, size, (void **) &a.data, &a.array_buffer);
+        status = napi_create_arraybuffer(env, word_count * sizeof(uint64_t), (void **) &a.data,
+                                         &a.array_buffer);
         if (status != napi_ok) {
             napi_fatal_error(NULL, 0, "Failed to create array buffer", NAPI_AUTO_LENGTH);
         }
@@ -173,7 +109,7 @@ typedef struct bigint {
     allocation buf;
 } bigint;
 
-bool get_bigint_words(napi_env env, napi_callback_info info, bigint *b) {
+static bool get_bigint_words(napi_env env, napi_callback_info info, bigint *b) {
     napi_status status;
 
     napi_value argv[1];
@@ -236,15 +172,14 @@ napi_value to_bytes_be(napi_env env, napi_callback_info info) {
     napi_status status;
 
     bigint b;
-
     if (!get_bigint_words(env, info, &b)) {
         return NULL;
     }
 
-    size_t len = b.word_count * sizeof(uint64_t);
+    size_t len = 0;
     if (b.word_count > 0) {
         uint64_t tail = b.buf.data[b.word_count - 1];
-        len -= clzb(tail);
+        len = (b.word_count * sizeof(uint64_t)) - clzb(tail);
 
         reverse((uint8_t *) b.buf.data, len);
     }
@@ -261,32 +196,25 @@ napi_value to_bytes_be(napi_env env, napi_callback_info info) {
 }
 
 NAPI_MODULE_INIT() {
-    napi_status status;
 
-    napi_value to_bytes_le_fn;
-    napi_value to_bytes_be_fn;
+#define EXPORT_FUNCTION(env, fn, name, fail)                                                       \
+  do {                                                                                             \
+    napi_value fn_value;                                                                           \
+    napi_status status;                                                                            \
+                                                                                                   \
+    status = napi_create_function(env, name, NAPI_AUTO_LENGTH, fn, NULL, &fn_value);               \
+    if (status != napi_ok) {                                                                       \
+      goto fail;                                                                                   \
+    }                                                                                              \
+                                                                                                   \
+    status = napi_set_named_property(env, exports, name, fn_value);                                \
+    if (status != napi_ok) {                                                                       \
+      goto fail;                                                                                   \
+    }                                                                                              \
+  } while (0)
 
-    status = napi_create_function(env, "toBytesLE", NAPI_AUTO_LENGTH, to_bytes_le, NULL,
-                                  &to_bytes_le_fn);
-    if (status != napi_ok) {
-        goto fail;
-    }
-
-    status = napi_create_function(env, "toBytesBE", NAPI_AUTO_LENGTH, to_bytes_be, NULL,
-                                  &to_bytes_be_fn);
-    if (status != napi_ok) {
-        goto fail;
-    }
-
-    status = napi_set_named_property(env, exports, "toBytesLE", to_bytes_le_fn);
-    if (status != napi_ok) {
-        goto fail;
-    }
-
-    status = napi_set_named_property(env, exports, "toBytesBE", to_bytes_be_fn);
-    if (status != napi_ok) {
-        goto fail;
-    }
+    EXPORT_FUNCTION(env, to_bytes_le, "toBytesLE", fail);
+    EXPORT_FUNCTION(env, to_bytes_be, "toBytesBE", fail);
 
     return exports;
 
