@@ -49,9 +49,8 @@ const modulePath = (() => {
 })();
 
 type NativeModule = {
-  wordLength(n: bigint): number;
-  toBytesLE(n: bigint, buf: Uint8Array): number;
-  toBytesBE(n: bigint, buf: Uint8Array): number;
+  toBytesLE(n: bigint): Uint8Array;
+  toBytesBE(n: bigint): Uint8Array;
   fromBytesLE(buf: Uint8Array): bigint;
   fromBytesBE(buf: Uint8Array): bigint;
 };
