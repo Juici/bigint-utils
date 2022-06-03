@@ -1,5 +1,5 @@
 import { alloc } from "../alloc";
-import { loadNative } from "./native";
+import { loadNative } from "./bindings";
 import {
   toBytesLE as fbToBytesLE,
   toBytesBE as fbToBytesBE,

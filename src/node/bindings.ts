@@ -67,12 +67,12 @@ export function loadNative(): NativeModule {
  * Search for a node-gyp build.
  */
 function findBuild(dir: string): string | null {
-  const file = path.join(dir, `${libName}_${platform}_${arch}.node`);
-
   try {
-    if (fs.statSync(file).isFile()) {
-      return file;
-    }
+    return (
+      fs
+        .readdirSync(dir, { withFileTypes: true })
+        .find((f) => f.isFile() && f.name.endsWith(".node"))?.name ?? null
+    );
   } catch (_e) {}
 
   return null;

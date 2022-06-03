@@ -1,0 +1,7 @@
+BasedOnStyle: LLVM
+ColumnLimit: 100
+IndentWidth: 4
+PPIndentWidth: 2
+IndentPPDirectives: BeforeHash
+
+SpaceAfterCStyleCast: true
