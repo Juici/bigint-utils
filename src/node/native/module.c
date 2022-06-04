@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bswap.h"
 #include "utils.h"
 
 // The size of an alloc pool in uint64_t words.
