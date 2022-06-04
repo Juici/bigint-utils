@@ -72,7 +72,7 @@ function findBuild(dir: string): string | null {
         .readdirSync(dir, { withFileTypes: true })
         .find((f) => f.isFile() && f.name.endsWith(".node"))?.name ?? null
     );
-  } catch (_e) {}
+  } catch (_) {}
 
   return null;
 }
@@ -188,7 +188,7 @@ function findArch(dir: string): string | null {
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch (_e) {
+  } catch (_) {
     return null;
   }
 

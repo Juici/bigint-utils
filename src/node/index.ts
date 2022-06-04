@@ -1,4 +1,3 @@
-import { alloc } from "../alloc";
 import { loadNative } from "./bindings";
 import {
   toBytesLE as fbToBytesLE,
@@ -14,6 +13,6 @@ let fromBytesBE = fbFromBytesBE;
 
 try {
   ({ toBytesLE, toBytesBE, fromBytesLE, fromBytesBE } = loadNative());
-} catch (_e) {}
+} catch (_) {}
 
 export { toBytesLE, toBytesBE, fromBytesLE, fromBytesBE };
