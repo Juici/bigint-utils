@@ -1,6 +1,6 @@
 {
   "name": "bigint-utils",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "A bigint utility library",
   "license": "(MIT OR Apache-2.0)",
   "main": "dist/index.js",
@@ -12,6 +12,9 @@
     "build:native": "node-gyp build",
     "build:ts": "rollup --config rollup.config.ts --configPlugin typescript",
     "build": "yarn build:native && yarn build:ts"
+  },
+  "dependencies": {
+    "node-gyp-build": "^4.4.0"
   },
   "devDependencies": {
     "@rollup/plugin-alias": "^3.1.9",
@@ -35,11 +38,6 @@
   "engines": {
     "node": ">=10.20.0"
   },
-  "files": [
-    "dist/**/*.js",
-    "prebuilds/*/*.node",
-    "index.d.ts"
-  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -50,8 +48,5 @@
       "default": "./dist/esm/index.browser.js"
     },
     "./dist/*": "./dist/*"
-  },
-  "dependencies": {
-    "node-gyp-build": "^4.4.0"
   }
 }
