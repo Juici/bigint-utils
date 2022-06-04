@@ -67,11 +67,10 @@ export function loadNative(): NativeModule {
  */
 function findBuild(dir: string): string | null {
   try {
-    return (
-      fs
-        .readdirSync(dir, { withFileTypes: true })
-        .find((f) => f.isFile() && f.name.endsWith(".node"))?.name ?? null
-    );
+    const file = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .find((f) => f.isFile() && f.name.endsWith(".node"))?.name;
+    return file ? path.join(dir, file) : null;
   } catch (_) {}
 
   return null;
