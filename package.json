@@ -38,6 +38,13 @@
   "engines": {
     "node": ">=10.20.0"
   },
+  "files": [
+    "src",
+    "binding.gyp",
+    "dist/**/*.js",
+    "prebuilds/*/*.node",
+    "index.d.ts"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
