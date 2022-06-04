@@ -3,11 +3,17 @@
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "bswap.h"
 #include "utils.h"
 
 // The size of an alloc pool in uint64_t words.
 #define POOL_SIZE 1024
+
+// The maximum number of words we'll store on the stack.
+#define MAX_STACK_WORDS 32
 
 typedef struct allocation {
     /**
@@ -126,7 +132,7 @@ static bool get_bigint_words(napi_env env, napi_callback_info info, bigint *b) {
 
     status = napi_get_value_bigint_words(env, argv[0], NULL, &b->word_count, NULL);
     if (status != napi_ok) {
-        napi_throw_type_error(env, "ERR_INVALID_ARG_TYPE", "Expected argument to be typeof bigint");
+        napi_throw_type_error(env, "ERR_INVALID_ARG_TYPE", "Expected argument to be a bigint");
         return false;
     }
 
@@ -195,26 +201,170 @@ napi_value to_bytes_be(napi_env env, napi_callback_info info) {
     return result;
 }
 
+typedef struct uint8_array {
+    uint8_t *data;
+    size_t len;
+} uint8_array;
+
+static bool get_uint8_array(napi_env env, napi_callback_info info, uint8_array *array) {
+    napi_status status;
+
+    napi_value argv[1];
+    size_t argc = 1;
+
+    status = napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+    if (status != napi_ok) {
+        napi_fatal_error(NULL, 0, "Failed to get callback info", NAPI_AUTO_LENGTH);
+    }
+    if (argc != 1) {
+        napi_throw_type_error(env, "ERR_MISSING_ARGS", "Wrong number of arguments");
+        return false;
+    }
+
+    napi_typedarray_type type;
+
+    status = napi_get_typedarray_info(env, argv[0], &type, &array->len, (void **) &array->data,
+                                      NULL, NULL);
+    if (status != napi_ok || type != napi_uint8_array) {
+        napi_throw_type_error(env, "ERR_INVALID_ARG_TYPE", "Expected argument to be a Uint8Array");
+        return false;
+    }
+
+    return true;
+}
+
+// TODO: Use alloc pool for from_bytes as well?
+
+napi_value from_bytes_le(napi_env env, napi_callback_info info) {
+    napi_status status;
+    napi_value result;
+
+    uint64_t stack_buf[MAX_STACK_WORDS];
+
+    uint8_array a;
+    if (!get_uint8_array(env, info, &a)) {
+        return NULL;
+    }
+
+    size_t word_count = a.len / sizeof(uint64_t);
+    size_t remainder = a.len % sizeof(uint64_t);
+
+    // If the data if 8-byte aligned and fits in an exact amount of words, then
+    // we can just use the data directly.
+    if (((uintptr_t) a.data) % sizeof(uint64_t) == 0 && remainder == 0) {
+        status = napi_create_bigint_words(env, 0, word_count, (uint64_t *) a.data, &result);
+        if (status != napi_ok) {
+            goto fail;
+        }
+        return result;
+    }
+
+    word_count += (remainder > 0);
+
+    bool fits_in_stack = word_count <= MAX_STACK_WORDS;
+
+    uint64_t *buf = stack_buf;
+    if (!fits_in_stack) {
+        buf = malloc(a.len + remainder);
+        if (buf == NULL) {
+            napi_throw_error(env, "ERR_MEMORY_ALLOCATION_FAILED", "Failed to allocate memory");
+            return NULL;
+        }
+    }
+
+    if (remainder > 0) {
+        // Zero the trailing bytes.
+        memset(buf + a.len, 0, remainder);
+    }
+    memcpy(buf, a.data, a.len);
+
+    status = napi_create_bigint_words(env, 0, word_count, (uint64_t *) a.data, &result);
+    if (status != napi_ok) {
+        goto fail;
+    }
+
+    if (!fits_in_stack) {
+        free(buf);
+    }
+
+    return result;
+
+fail:
+    napi_fatal_error(NULL, 0, "Failed to create bigint", NAPI_AUTO_LENGTH);
+}
+
+napi_value from_bytes_be(napi_env env, napi_callback_info info) {
+    napi_status status;
+    napi_value result;
+
+    uint64_t stack_buf[MAX_STACK_WORDS];
+
+    uint8_array a;
+    if (!get_uint8_array(env, info, &a)) {
+        return NULL;
+    }
+
+    size_t word_count = a.len / sizeof(uint64_t);
+    size_t remainder = a.len % sizeof(uint64_t);
+
+    word_count += (remainder > 0);
+    remainder = 8 - remainder;
+
+    size_t buf_len = word_count * sizeof(uint64_t);
+    bool fits_in_stack = word_count <= MAX_STACK_WORDS;
+
+    uint64_t *buf = stack_buf;
+    if (!fits_in_stack) {
+        buf = malloc(buf_len);
+        if (buf == NULL) {
+            napi_throw_error(env, "ERR_MEMORY_ALLOCATION_FAILED", "Failed to allocate memory");
+            return NULL;
+        }
+    }
+
+    memset(buf, 0, remainder);
+    memcpy(&((uint8_t *) buf)[remainder], a.data, a.len);
+
+    reverse((uint8_t *) buf, buf_len);
+
+    status = napi_create_bigint_words(env, 0, word_count, buf, &result);
+    if (status != napi_ok) {
+        goto fail;
+    }
+
+    if (!fits_in_stack) {
+        free(buf);
+    }
+
+    return result;
+
+fail:
+    napi_fatal_error(NULL, 0, "Failed to create bigint", NAPI_AUTO_LENGTH);
+}
+
 NAPI_MODULE_INIT() {
 
 #define EXPORT_FUNCTION(env, fn, name, fail)                                                       \
-  do {                                                                                             \
-    napi_value fn_value;                                                                           \
-    napi_status status;                                                                            \
+    do {                                                                                           \
+        napi_value fn_value;                                                                       \
+        napi_status status;                                                                        \
                                                                                                    \
-    status = napi_create_function(env, name, NAPI_AUTO_LENGTH, fn, NULL, &fn_value);               \
-    if (status != napi_ok) {                                                                       \
-      goto fail;                                                                                   \
-    }                                                                                              \
+        status = napi_create_function(env, name, NAPI_AUTO_LENGTH, fn, NULL, &fn_value);           \
+        if (status != napi_ok) {                                                                   \
+            goto fail;                                                                             \
+        }                                                                                          \
                                                                                                    \
-    status = napi_set_named_property(env, exports, name, fn_value);                                \
-    if (status != napi_ok) {                                                                       \
-      goto fail;                                                                                   \
-    }                                                                                              \
-  } while (0)
+        status = napi_set_named_property(env, exports, name, fn_value);                            \
+        if (status != napi_ok) {                                                                   \
+            goto fail;                                                                             \
+        }                                                                                          \
+    } while (0)
 
     EXPORT_FUNCTION(env, to_bytes_le, "toBytesLE", fail);
     EXPORT_FUNCTION(env, to_bytes_be, "toBytesBE", fail);
+
+    EXPORT_FUNCTION(env, from_bytes_le, "fromBytesLE", fail);
+    EXPORT_FUNCTION(env, from_bytes_be, "fromBytesBE", fail);
 
     return exports;
 
