@@ -78,6 +78,8 @@ static allocation alloc(napi_env env, size_t word_count) {
             if (pool_ref != NULL) {
                 status = napi_reference_unref(env, pool_ref, NULL);
                 assert(status == napi_ok);
+                status = napi_delete_reference(env, pool_ref);
+                assert(status == napi_ok);
             }
 
             create_pool(env);
